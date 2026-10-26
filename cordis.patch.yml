@@ -1,0 +1,16 @@
+# ============================================================================
+# dsh-whale-pig-widget —— DSH bundle patch
+# ============================================================================
+# fork 自 dsh-whale-widget 0.4.2（MeteorNOX，MIT）：在完整保留鲸鱼挂件功能的前提下，
+# 内置一只会「吃饭 / 睡觉」的小猪角色。挂载方式与上游一致：一层 bundle patch。
+#
+# 安装：dsh plugin --profile web add link:<本目录绝对路径>
+#   （或交给 DSH：plugin_manager → install_bundle → target 指到本目录）
+#
+# ⚠️ 本插件与上游 dsh-whale-widget 注册同一批 /dsh-whale/* 路由，
+#     两者不可同时启用 —— 先卸掉上游，再装这一版。
+# ============================================================================
+
+- insert:
+    - id: dsh-whale-pig-widget
+      name: dsh-whale-pig-widget
