@@ -585,6 +585,10 @@ var css = [
   // 新增影响的只有滚轮，由 onWhaleWheel 转交给指针下方真正可滚动的容器。
   '.dshwv-root.dshwv-cursor-grab .dshwv-img{pointer-events:auto;cursor:grab}',
   '.dshwv-root.dshwv-cursor-grabbing .dshwv-img{pointer-events:auto;cursor:grabbing}',
+  // v910（fork）：任务跑完时小猪冒一句台词。独立元素，不进泡泡队列，坏掉也只影响自己。
+  '.dshwv-speech{position:absolute;right:5%;bottom:calc(59.45% + 4px);max-width:80%;padding:7px 11px;border-radius:12px;background:var(--dsw-alias-bg-overlay,rgba(30,30,32,.94));color:var(--dsw-alias-label-primary,#f2f2f2);border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.16));font-size:12px;line-height:1.45;box-shadow:0 6px 18px rgba(0,0,0,.3);opacity:0;transform:translateY(6px) scale(.96);transition:opacity .18s ease,transform .18s ease;pointer-events:none;z-index:5;white-space:pre-wrap;word-break:break-word;text-align:left}',
+  '.dshwv-speech::after{content:"";position:absolute;right:20px;top:100%;border:6px solid transparent;border-top-color:var(--dsw-alias-bg-overlay,rgba(30,30,32,.94))}',
+  '.dshwv-speech.dshwv-on{opacity:1;transform:none}',
   // 拖动期间握点相对挂件固定，让整个盒接过指针以保持 grabbing（类由按下时加、endDrag 摘）
   '.dshwv-root.dshwv-dragging .dshwv-body{pointer-events:auto;cursor:grabbing}',
   '.dshwv-pop{position:absolute;left:0;top:0;width:100%;aspect-ratio:1026/700;pointer-events:none;z-index:1;--dshw-u:calc(var(--dshw-base) / 1026)}',
@@ -2189,6 +2193,31 @@ var rowPetWake = menuRow()
 rowPetWake.appendChild(menuLabel('摸一下叫醒'))
 rowPetWake.appendChild(petWakeToggle)
 menuBox.appendChild(rowPetWake)
+// v910（fork）：**说句话**独立开关 —— 只在一轮任务跑完时触发：播一声猪叫 + 冒一句台词。
+//   不做定时喊（用户明确不要间隔），跑完才吭声。
+var speechToggle = document.createElement('input')
+speechToggle.type = 'checkbox'
+speechToggle.className = 'dshwv-check'
+try { speechToggle.checked = (localStorage.getItem('dshw-speech') || '1') !== '0' } catch (err) {}
+speechToggle.title = '说句话：任务跑完时叫一声并冒一句台词'
+speechToggle.addEventListener('change', function () {
+  try { localStorage.setItem('dshw-speech', speechToggle.checked ? '1' : '0') } catch (err) {}
+  try { if (window.__dshwSpeech) window.__dshwSpeech.set(speechToggle.checked) } catch (err) {}
+})
+var speechEditBtn = document.createElement('button')
+speechEditBtn.type = 'button'
+speechEditBtn.className = 'dshwv-about-iconbtn'
+speechEditBtn.textContent = '✎'
+speechEditBtn.title = '编辑台词（每行一句）'
+speechEditBtn.addEventListener('click', function (e) {
+  e.stopPropagation()
+  try { if (window.__dshwSpeech) window.__dshwSpeech.edit() } catch (err) {}
+})
+var rowSpeech = menuRow()
+rowSpeech.appendChild(menuLabel('说句话'))
+rowSpeech.appendChild(speechEditBtn)
+rowSpeech.appendChild(speechToggle)
+menuBox.appendChild(rowSpeech)
 menuBox.appendChild(row1)
 menuBox.appendChild(row2)
 menuBox.appendChild(row6)
@@ -22616,3 +22645,117 @@ try { dshwTryStart(true) } catch (err) {}
   else boot()
 })()
 /* dshw-work-look v3 END */
+
+/* dshw-pig-speech v1（fork 新增）—— 任务跑完：叫一声 + 冒一句台词。
+   触发源与「每轮消耗」同一个宿主端点（last-turn.json 的 seq 递增），不新增宿主代码；
+   开关 dshw-speech，台词 dshw-speech-lines（JSON 数组，面板 ✎ 可编辑），已播 seq 记 dshw-speech-seq。
+   不做定时喊：用户明确不要间隔，只有"跑完"这一刻吭声。 */
+;(function () {
+  var API = '/dsh-whale/last-turn.json'
+  var OINK = '/dsh-whale/audio-fragment?id=pig-oink'
+  var DEFAULT_LINES = [
+    '哼哼，这轮干完了 🐷',
+    '收工！喂我一口吧',
+    '活儿交差了，去眯一会儿',
+    '跑完啦，主人也该歇歇了',
+    '啃完这堆活，饱了',
+    '报告：任务完成，哼哼～',
+    '又干掉一轮，奖励呢？',
+    '这单干得漂亮，我先吃为敬'
+  ]
+  function ls(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : v } catch (err) { return d } }
+  function speechOn() { return ls('dshw-speech', '1') !== '0' }
+  function lines() {
+    try {
+      var a = JSON.parse(localStorage.getItem('dshw-speech-lines') || 'null')
+      if (Array.isArray(a)) {
+        var clean = a.filter(function (x) { return typeof x === 'string' && x.trim() !== '' })
+        if (clean.length) return clean
+      }
+    } catch (err) {}
+    return DEFAULT_LINES.slice()
+  }
+  var el = null
+  var hideTimer = null
+  var lastIdx = -1
+  function ensureEl() {
+    try {
+      if (el && el.isConnected) return el
+      var root = document.querySelector('.dshwv-root')
+      if (!root) { el = null; return null }
+      el = document.createElement('div')
+      el.className = 'dshwv-speech'
+      root.appendChild(el)
+      return el
+    } catch (err) { return null }
+  }
+  function say(text) {
+    var e = ensureEl()
+    if (!e) return
+    e.textContent = String(text)
+    e.classList.add('dshwv-on')
+    clearTimeout(hideTimer)
+    hideTimer = setTimeout(function () { try { e.classList.remove('dshwv-on') } catch (err) {} }, 5200)
+  }
+  function oink() {
+    try {
+      var a = new Audio(OINK)
+      a.volume = 0.9
+      var pr = a.play()
+      if (pr && pr.catch) pr.catch(function () {})   // 浏览器可能拦自动播放：静默失败，气泡照旧
+    } catch (err) {}
+  }
+  function pick() {
+    var arr = lines()
+    if (arr.length === 1) return arr[0]
+    var i = Math.floor(Math.random() * arr.length)
+    if (i === lastIdx) i = (i + 1) % arr.length
+    lastIdx = i
+    return arr[i]
+  }
+  var seq = 0
+  try { seq = Number(localStorage.getItem('dshw-speech-seq') || 0) || 0 } catch (err) {}
+  var aligned = false
+  function remember(n) { seq = n; try { localStorage.setItem('dshw-speech-seq', String(n)) } catch (err) {} }
+  function tick() {
+    try {
+      // 非主界面（登录页/设置宫格等）不轮询：挂件根本不在，问了也白问
+      if (!document.querySelector('.dshwv-root')) return
+      fetch(API, { cache: 'no-store' })
+        .then(function (r) { return r.json() })
+        .then(function (d) {
+          if (!d || !d.ok || typeof d.seq !== 'number') return
+          if (!aligned) {
+            aligned = true
+            if (d.seq > seq) { remember(d.seq); fire() } else { remember(d.seq) }
+            return
+          }
+          if (d.seq > seq) { remember(d.seq); fire() }
+        })
+        .catch(function () {})
+    } catch (err) {}
+  }
+  function fire() { if (!speechOn()) return; oink(); say(pick()) }
+  function edit() {
+    var cur = lines().join('\n')
+    var next = null
+    try { next = window.prompt('每行一句台词（留空=恢复默认）', cur) } catch (err) { return }
+    if (next == null) return
+    try {
+      if (next.trim() === '') localStorage.removeItem('dshw-speech-lines')
+      else localStorage.setItem('dshw-speech-lines', JSON.stringify(next.split('\n').map(function (x) { return x.trim() }).filter(Boolean)))
+    } catch (err) {}
+    say('台词已更新')
+  }
+  window.__dshwSpeech = {
+    say: say,
+    oink: oink,
+    edit: edit,
+    lines: lines,
+    on: speechOn,
+    set: function (v) { try { localStorage.setItem('dshw-speech', v ? '1' : '0') } catch (err) {} },
+    test: function () { oink(); say(pick()) }
+  }
+  setInterval(tick, 1500)
+  tick()
+})()
