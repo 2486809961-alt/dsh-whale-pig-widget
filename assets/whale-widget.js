@@ -586,9 +586,12 @@ var css = [
   '.dshwv-root.dshwv-cursor-grab .dshwv-img{pointer-events:auto;cursor:grab}',
   '.dshwv-root.dshwv-cursor-grabbing .dshwv-img{pointer-events:auto;cursor:grabbing}',
   // v910（fork）：任务跑完时小猪冒一句台词。独立元素，不进泡泡队列，坏掉也只影响自己。
-  '.dshwv-speech{position:absolute;right:5%;bottom:calc(59.45% + 4px);max-width:80%;padding:7px 11px;border-radius:12px;background:var(--dsw-alias-bg-overlay,rgba(30,30,32,.94));color:var(--dsw-alias-label-primary,#f2f2f2);border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.16));font-size:12px;line-height:1.45;box-shadow:0 6px 18px rgba(0,0,0,.3);opacity:0;transform:translateY(6px) scale(.96);transition:opacity .18s ease,transform .18s ease;pointer-events:none;z-index:5;white-space:pre-wrap;word-break:break-word;text-align:left}',
-  '.dshwv-speech::after{content:"";position:absolute;right:20px;top:100%;border:6px solid transparent;border-top-color:var(--dsw-alias-bg-overlay,rgba(30,30,32,.94))}',
+  // v911：position:fixed + 由 JS 按角色图实测矩形定位（不再嵌进 .dshwv-root —— root 的子节点会被
+  //   挂件自己的 DOM 守护重排，嵌进去的节点可能被清掉或撑不起高度）。
+  '.dshwv-speech{position:fixed;right:16px;bottom:180px;max-width:260px;padding:7px 11px;border-radius:12px;background:var(--dsw-alias-bg-overlay,rgba(30,30,32,.94));color:var(--dsw-alias-label-primary,#f2f2f2);border:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.16));font-size:12px;line-height:1.45;box-shadow:0 6px 18px rgba(0,0,0,.3);opacity:0;transform:translateY(6px) scale(.96);transition:opacity .18s ease,transform .18s ease;pointer-events:none;z-index:99999;white-space:pre-wrap;word-break:break-word;text-align:left}',
   '.dshwv-speech.dshwv-on{opacity:1;transform:none}',
+  '.dshwv-speech-btn{border:1px solid rgba(32,49,112,.28);border-radius:5px;background:rgba(32,49,112,.06);color:#203170;font-size:11px;line-height:16px;padding:0 4px;cursor:pointer;flex:0 0 auto}',
+  '.dshwv-speech-btn:hover{background:rgba(32,49,112,.16)}',
   // 拖动期间握点相对挂件固定，让整个盒接过指针以保持 grabbing（类由按下时加、endDrag 摘）
   '.dshwv-root.dshwv-dragging .dshwv-body{pointer-events:auto;cursor:grabbing}',
   '.dshwv-pop{position:absolute;left:0;top:0;width:100%;aspect-ratio:1026/700;pointer-events:none;z-index:1;--dshw-u:calc(var(--dshw-base) / 1026)}',
@@ -2206,15 +2209,26 @@ speechToggle.addEventListener('change', function () {
 })
 var speechEditBtn = document.createElement('button')
 speechEditBtn.type = 'button'
-speechEditBtn.className = 'dshwv-about-iconbtn'
+speechEditBtn.className = 'dshwv-speech-btn'
 speechEditBtn.textContent = '✎'
 speechEditBtn.title = '编辑台词（每行一句）'
 speechEditBtn.addEventListener('click', function (e) {
   e.stopPropagation()
   try { if (window.__dshwSpeech) window.__dshwSpeech.edit() } catch (err) {}
 })
+// v911：行内的 ♪ 是「立刻试一句」——不用等任务跑完就能验气泡/声音在不在。
+var speechTestBtn = document.createElement('button')
+speechTestBtn.type = 'button'
+speechTestBtn.className = 'dshwv-speech-btn'
+speechTestBtn.textContent = '\u266a'
+speechTestBtn.title = '试一句（立刻叫一声 + 冒气泡）'
+speechTestBtn.addEventListener('click', function (e) {
+  e.stopPropagation()
+  try { if (window.__dshwSpeech) window.__dshwSpeech.test() } catch (err) {}
+})
 var rowSpeech = menuRow()
 rowSpeech.appendChild(menuLabel('说句话'))
+rowSpeech.appendChild(speechTestBtn)
 rowSpeech.appendChild(speechEditBtn)
 rowSpeech.appendChild(speechToggle)
 menuBox.appendChild(rowSpeech)
@@ -22649,10 +22663,13 @@ try { dshwTryStart(true) } catch (err) {}
 /* dshw-pig-speech v1（fork 新增）—— 任务跑完：叫一声 + 冒一句台词。
    触发源与「每轮消耗」同一个宿主端点（last-turn.json 的 seq 递增），不新增宿主代码；
    开关 dshw-speech，台词 dshw-speech-lines（JSON 数组，面板 ✎ 可编辑），已播 seq 记 dshw-speech-seq。
-   不做定时喊：用户明确不要间隔，只有"跑完"这一刻吭声。 */
+   不做定时喊：用户明确不要间隔，只有"跑完"这一刻吭声。
+   v911：气泡改为 body 级 fixed 定位（按角色图实测矩形摆放），并加 /dsh-whale/debug-log 打点，
+        便于在没有浏览器控制权的情况下确认"到底哪一步没发生"。 */
 ;(function () {
   var API = '/dsh-whale/last-turn.json'
   var OINK = '/dsh-whale/audio-fragment?id=pig-oink'
+  var LOG = '/dsh-whale/debug-log?m='
   var DEFAULT_LINES = [
     '哼哼，这轮干完了 🐷',
     '收工！喂我一口吧',
@@ -22663,6 +22680,7 @@ try { dshwTryStart(true) } catch (err) {}
     '又干掉一轮，奖励呢？',
     '这单干得漂亮，我先吃为敬'
   ]
+  function log(m) { try { fetch(LOG + encodeURIComponent(m), { cache: 'no-store' }).catch(function () {}) } catch (err) {} }
   function ls(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : v } catch (err) { return d } }
   function speechOn() { return ls('dshw-speech', '1') !== '0' }
   function lines() {
@@ -22678,32 +22696,68 @@ try { dshwTryStart(true) } catch (err) {}
   var el = null
   var hideTimer = null
   var lastIdx = -1
+  function place(e) {
+    try {
+      var im = document.querySelector('.dshwv-img')
+      if (!im) { log('place: no .dshwv-img'); return }
+      var r = im.getBoundingClientRect()
+      if (!r.width || !r.height) { log('place: zero rect ' + r.width + 'x' + r.height); return }
+      var gap = 8
+      e.style.right = Math.max(8, Math.round(window.innerWidth - r.right - 4)) + 'px'
+      e.style.bottom = Math.max(8, Math.round(window.innerHeight - r.top + gap)) + 'px'
+      e.style.maxWidth = Math.max(120, Math.min(300, Math.round(r.width * 1.1))) + 'px'
+      log('place ok rect=' + Math.round(r.width) + 'x' + Math.round(r.height) + ' at ' + Math.round(r.left) + ',' + Math.round(r.top))
+    } catch (err) { log('place err ' + err) }
+  }
   function ensureEl() {
     try {
       if (el && el.isConnected) return el
-      var root = document.querySelector('.dshwv-root')
-      if (!root) { el = null; return null }
       el = document.createElement('div')
       el.className = 'dshwv-speech'
-      root.appendChild(el)
+      el.setAttribute('data-dshw-speech', '1')
+      // v912：关键样式**全部内联**。挂件自身的样式表有可能被宿主/主题的 !important 规则压掉，
+      //   气泡这种"临时提示"不该跟着整张表一起失效 —— 内联后即使 CSS 一条都没生效也能看见。
+      var st = el.style
+      st.position = 'fixed'; st.right = '16px'; st.bottom = '180px'
+      st.zIndex = '2147483000'; st.maxWidth = '260px'; st.boxSizing = 'border-box'
+      st.padding = '7px 11px'; st.borderRadius = '12px'
+      st.fontSize = '12px'; st.lineHeight = '1.45'; st.textAlign = 'left'
+      st.whiteSpace = 'pre-wrap'; st.wordBreak = 'break-word'
+      st.background = 'rgba(30,30,32,.94)'; st.color = '#f2f2f2'
+      st.border = '1px solid rgba(255,255,255,.16)'; st.boxShadow = '0 6px 18px rgba(0,0,0,.3)'
+      st.pointerEvents = 'none'; st.fontFamily = 'inherit'
+      st.transition = 'opacity .18s ease, transform .18s ease'
+      st.opacity = '0'; st.transform = 'translateY(6px) scale(.96)'
+      ;(document.body || document.documentElement).appendChild(el)
+      log('ensureEl: created, body=' + !!document.body)
       return el
-    } catch (err) { return null }
+    } catch (err) { log('ensureEl err ' + err); el = null; return null }
   }
   function say(text) {
     var e = ensureEl()
-    if (!e) return
+    if (!e) { log('say: no el'); return false }
+    place(e)
     e.textContent = String(text)
+    // 强制一次样式计算，确保 transition 真的从 0 开始（有些环境里同一帧加类不触发过渡）
+    try { void e.offsetHeight } catch (err) {}
     e.classList.add('dshwv-on')
+    e.style.opacity = '1'
+    e.style.transform = 'none'
+    log('say: "' + String(text).slice(0, 20) + '" op=' + e.style.opacity + ' bottom=' + e.style.bottom + ' right=' + e.style.right)
     clearTimeout(hideTimer)
-    hideTimer = setTimeout(function () { try { e.classList.remove('dshwv-on') } catch (err) {} }, 5200)
+    hideTimer = setTimeout(function () {
+      try { e.classList.remove('dshwv-on'); e.style.opacity = '0'; e.style.transform = 'translateY(6px) scale(.96)' } catch (err) {}
+    }, 5200)
+    return true
   }
   function oink() {
     try {
       var a = new Audio(OINK)
       a.volume = 0.9
       var pr = a.play()
-      if (pr && pr.catch) pr.catch(function () {})   // 浏览器可能拦自动播放：静默失败，气泡照旧
-    } catch (err) {}
+      if (pr && pr.then) pr.then(function () { log('oink: played') }).catch(function (e) { log('oink: blocked ' + e) })
+      else log('oink: play() returned no promise')
+    } catch (err) { log('oink err ' + err) }
   }
   function pick() {
     var arr = lines()
@@ -22714,48 +22768,61 @@ try { dshwTryStart(true) } catch (err) {}
     return arr[i]
   }
   var seq = 0
-  try { seq = Number(localStorage.getItem('dshw-speech-seq') || 0) || 0 } catch (err) {}
+  var hadStored = false
+  try {
+    var storedSeq = Number(localStorage.getItem('dshw-speech-seq') || 0) || 0
+    seq = storedSeq
+    hadStored = storedSeq > 0
+  } catch (err) {}
   var aligned = false
+  var ticked = 0
   function remember(n) { seq = n; try { localStorage.setItem('dshw-speech-seq', String(n)) } catch (err) {} }
   function tick() {
+    ticked++
     try {
-      // 非主界面（登录页/设置宫格等）不轮询：挂件根本不在，问了也白问
-      if (!document.querySelector('.dshwv-root')) return
+      if (!document.querySelector('.dshwv-root')) { if (ticked % 20 === 1) log('tick: no .dshwv-root yet'); return }
       fetch(API, { cache: 'no-store' })
         .then(function (r) { return r.json() })
         .then(function (d) {
           if (!d || !d.ok || typeof d.seq !== 'number') return
           if (!aligned) {
             aligned = true
-            if (d.seq > seq) { remember(d.seq); fire() } else { remember(d.seq) }
+            log('tick: aligned seq=' + d.seq + ' local=' + seq + ' hadStored=' + hadStored)
+            // 首次对齐：只有"上次真的播过"（本地有记录）且宿主已经更新，才补播这一次；
+            // 全新安装/清过缓存时只记基线，不凭空喊一声。
+            if (hadStored && d.seq > seq) { remember(d.seq); fire('first') } else { remember(d.seq) }
             return
           }
-          if (d.seq > seq) { remember(d.seq); fire() }
+          if (d.seq > seq) { remember(d.seq); fire('new') }
         })
-        .catch(function () {})
-    } catch (err) {}
+        .catch(function (e) { if (ticked % 20 === 2) log('tick fetch err ' + e) })
+    } catch (err) { log('tick err ' + err) }
   }
-  function fire() { if (!speechOn()) return; oink(); say(pick()) }
+  function fire(why) {
+    log('fire(' + why + ') on=' + speechOn())
+    if (!speechOn()) return
+    oink()
+    say(pick())
+  }
   function edit() {
     var cur = lines().join('\n')
     var next = null
-    try { next = window.prompt('每行一句台词（留空=恢复默认）', cur) } catch (err) { return }
+    try { next = window.prompt('每行一句台词（留空=恢复默认）', cur) } catch (err) { log('edit: prompt err ' + err); return }
     if (next == null) return
     try {
       if (next.trim() === '') localStorage.removeItem('dshw-speech-lines')
       else localStorage.setItem('dshw-speech-lines', JSON.stringify(next.split('\n').map(function (x) { return x.trim() }).filter(Boolean)))
-    } catch (err) {}
+      log('edit: saved ' + lines().length + ' lines')
+    } catch (err) { log('edit save err ' + err) }
     say('台词已更新')
   }
   window.__dshwSpeech = {
-    say: say,
-    oink: oink,
-    edit: edit,
-    lines: lines,
-    on: speechOn,
+    say: say, oink: oink, edit: edit, lines: lines, on: speechOn,
     set: function (v) { try { localStorage.setItem('dshw-speech', v ? '1' : '0') } catch (err) {} },
-    test: function () { oink(); say(pick()) }
+    test: function () { oink(); return say(pick()) },
+    log: log
   }
+  log('speech module loaded')
   setInterval(tick, 1500)
   tick()
 })()
