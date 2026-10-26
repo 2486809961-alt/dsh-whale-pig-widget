@@ -22702,10 +22702,12 @@ try { dshwTryStart(true) } catch (err) {}
       if (!im) { log('place: no .dshwv-img'); return }
       var r = im.getBoundingClientRect()
       if (!r.width || !r.height) { log('place: zero rect ' + r.width + 'x' + r.height); return }
-      var gap = 8
-      e.style.right = Math.max(8, Math.round(window.innerWidth - r.right - 4)) + 'px'
-      e.style.bottom = Math.max(8, Math.round(window.innerHeight - r.top + gap)) + 'px'
-      e.style.maxWidth = Math.max(120, Math.min(300, Math.round(r.width * 1.1))) + 'px'
+      // 摆在角色**左侧**、与脚底大致齐平：正上方是鲸鱼娘思考气泡的地盘（.dshwv-pop），
+      // 那里面要显示"本轮扣了多少钱"，说话气泡不能去抢位置。
+      var gap = 10
+      e.style.right = Math.max(8, Math.round(window.innerWidth - r.left + gap)) + 'px'
+      e.style.bottom = Math.max(10, Math.round(window.innerHeight - r.bottom + Math.round(r.height * 0.10))) + 'px'
+      e.style.maxWidth = Math.max(110, Math.min(230, Math.round(r.width * 0.95))) + 'px'
       log('place ok rect=' + Math.round(r.width) + 'x' + Math.round(r.height) + ' at ' + Math.round(r.left) + ',' + Math.round(r.top))
     } catch (err) { log('place err ' + err) }
   }
