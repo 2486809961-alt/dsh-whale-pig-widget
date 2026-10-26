@@ -47,12 +47,12 @@
 
 | 文件 | 说明 | 许可 |
 |---|---|---|
-| `assets/builtin/pig.gif` | 小猪·待机（三态之一，256×256 / 128 色 / 51 帧） | 同 `assets/` 规则：as-is 随插件分发，不授予再许可 |
+| `assets/builtin/pig.gif` | 小猪·待机（三态之一，256×256 / 255 色 / 51 帧 / 1-bit 透明） | 同 `assets/` 规则：as-is 随插件分发，不授予再许可 |
 | `assets/builtin/pig-busy.gif` | 小猪·干活（吃饲料，18 帧） | 同上 |
 | `assets/builtin/pig-sleep.gif` | 小猪·打盹（趴着睡，20 帧） | 同上 |
 | `assets/builtin/pig-oink.wav` | 猪叫一声（点击音效） | 同上 |
 
-这些文件由 fork 作者自备素材经缩放与调色板压缩而来（512×512 → 256×256，无外部素材、无第三方字体或图库）。
+这些文件由 fork 作者自备素材经缩放与调色板压缩而来（512×512 → 256×256，**保留原图 alpha 通道**：缩放用预乘 alpha + BILINEAR 采样，输出统一 255 色调色板并把索引 255 声明为透明，无外部素材、无第三方字体或图库）。
 如需替换为自己的宠物，覆盖同名文件即可。
 
 `lib/index.js` 中 fork 新增的代码（`ensureBuiltinPig()` 及其播种逻辑、`/dsh-whale/running.json` 路由、
